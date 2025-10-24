@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dining Philosophers — eBite</title>
+  <style>
+    :root{
+      --bg:#0b0710; --neon:#a86bff; --accent:#6ef0ff; --glass:rgba(255,255,255,0.04);
+      --card-radius:16px; --glass-2: rgba(255,255,255,0.03);
+    }
+    *{box-sizing:border-box;font-family:Inter,Segoe UI,system-ui,Arial}
+    body{margin:0;min-height:100vh;background:radial-gradient(circle at 20% 20%, rgba(168,107,255,0.08), transparent 10%), radial-gradient(circle at 80% 80%, rgba(110,240,255,0.03), transparent 10%), var(--bg); color:#e7e7ee}
+    .wrap{max-width:1100px;margin:28px auto;padding:20px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent); border-radius:var(--card-radius); padding:18px; display:grid; grid-template-columns: 1fr 360px; gap:18px; box-shadow: 0 6px 30px rgba(0,0,0,0.6); border:1px solid rgba(168,107,255,0.08)}
+    header h1{margin:0;font-size:20px;color:var(--neon); text-shadow:0 0 10px rgba(168,107,255,0.18)}
+    header p{margin:6px 0 0 0;font-size:13px;color:#cfd6ffcc}
+
+    /* left: simulation */
+    .stage{background:linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01)); border-radius:12px;padding:12px; display:flex;align-items:center;justify-content:center; position:relative;min-height:540px}
+    svg{width:100%;height:100%;max-height:560px}
+
+    .controls{display:flex;flex-direction:column;gap:12px}
+    .panel{background:var(--glass);padding:12px;border-radius:12px;border:1px solid var(--glass-2)}
+    .row{display:flex;gap:8px;align-items:center}
+    button{background:linear-gradient(90deg,var(--neon),var(--accent));border:none;padding:8px 12px;border-radius:10px;color:#051;cursor:pointer;font-weight:600}
+    select,input[type=range]{appearance:none;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    label{font-size:13px;color:#cbd1ffcc}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .legend .item{display:flex;gap:8px;align-items:center;font-size:13px}
+    .dot{width:12px;height:12px;border-radius:4px}
+
+    /* neon effects */
+    .philosopher text{font-size:12px;fill:#fff}
+    .philosopher .state{font-size:11px;opacity:0.9}
+    .fork{stroke:#aaa;stroke-width:3;stroke-linecap:round}
+
+    .footer{font-size:13px;color:#cbd1ffcc;margin-top:12px}
+
+    /* responsive */
+    @media(max-width:980px){.card{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div>
+        <header>
+          <h1>Dining Philosophers — animated eBite</h1>
+          <p>Visual demo of the classic concurrency problem. Toggle algorithms, watch philosophers think, get hungry, grab forks and eat. Neon theme for dramatic effect.</p>
+        </header>
+
+        <div class="stage panel" id="stage">
+          <!-- SVG simulation inserted by JS -->
+        </div>
+
+        <div class="footer">Algorithm notes: <strong id="mode-note">Naive (possible deadlock)</strong>. Try asymmetric mode to avoid deadlock.</div>
+      </div>
+
+      <aside class="controls">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <div>
+              <label>Philosophers</label>
+              <select id="numSelect">
+                <option>5</option>
+                <option>6</option>
+                <option>7</option>
+                <option>8</option>
+              </select>
+            </div>
+            <div>
+              <label>Algorithm</label>
+              <select id="modeSelect">
+                <option value="naive">Naive (may deadlock)</option>
+                <option value="asymmetric">Asymmetric (avoid deadlock)</option>
+                <option value="resourceHierarchy">Resource hierarchy (ordered forks)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:10px">
+            <button id="startBtn">Start</button>
+            <button id="pauseBtn">Pause</button>
+            <button id="resetBtn">Reset</button>
+            <label style="margin-left:8px">Speed</label>
+            <input id="speed" type="range" min="0.2" max="3" step="0.1" value="1">
+          </div>
+
+          <div class="legend">
+            <div class="item"><div class="dot" style="background: #7f8; box-shadow:0 0 8px #7f8"></div> Eating</div>
+            <div class="item"><div class="dot" style="background:#ff9; box-shadow:0 0 8px #ff9"></div> Hungry / Waiting</div>
+            <div class="item"><div class="dot" style="background:#89f; box-shadow:0 0 8px #89f"></div> Thinking</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <label>Log (recent events)</label>
+          <div id="log" style="height:220px;overflow:auto;padding:8px;background:transparent;border-radius:8px;border:1px solid rgba(255,255,255,0.02);font-size:13px"></div>
+        </div>
+
+        <div class="panel">
+          <label>How it works</label>
+          <p style="font-size:13px;color:#cbd1ffcc">Philosophers alternate thinking and trying to eat. To eat they must hold the fork to their left and right. If either fork is held, they wait. Different algorithms decide the order of picking forks to avoid deadlock.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+// Simulation core
+const stage = document.getElementById('stage');
+const logEl = document.getElementById('log');
+const numSelect = document.getElementById('numSelect');
+const modeSelect = document.getElementById('modeSelect');
+const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const resetBtn = document.getElementById('resetBtn');
+const speedInput = document.getElementById('speed');
+const modeNote = document.getElementById('mode-note');
+
+let N = parseInt(numSelect.value);
+let mode = modeSelect.value;
+let running = false;
+let speed = parseFloat(speedInput.value);
+let philosophers = [];
+let forks = [];
+let animFrame = null;
+let lastTick = null;
+
+function log(msg){
+  const t = new Date().toLocaleTimeString();
+  logEl.innerHTML = `<div style="margin-bottom:6px">[${t}] ${msg}</div>` + logEl.innerHTML;
+  if(logEl.childElementCount>200) logEl.removeChild(logEl.lastChild);
+}
+
+function rand(min,max){return Math.floor(Math.random()*(max-min+1))+min}
+
+function createSVG(){
+  stage.innerHTML = '';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const w=720,h=540; const cx=w/2, cy=h/2, R=170;
+  const svg = document.createElementNS(svgNS,'svg');
+  svg.setAttribute('viewBox',`0 0 ${w} ${h}`);
+  svg.style.maxWidth='100%';
+
+  // bowl
+  const bowl = document.createElementNS(svgNS,'circle');
+  bowl.setAttribute('cx',cx); bowl.setAttribute('cy',cy); bowl.setAttribute('r',60);
+  bowl.setAttribute('fill','url(#bowlGrad)');
+  bowl.setAttribute('stroke','rgba(255,255,255,0.06)'); bowl.setAttribute('stroke-width',2);
+
+  // defs for glow
+  const defs = document.createElementNS(svgNS,'defs');
+  const grad = document.createElementNS(svgNS,'radialGradient'); grad.setAttribute('id','bowlGrad');
+  const stop1 = document.createElementNS(svgNS,'stop'); stop1.setAttribute('offset','0%'); stop1.setAttribute('stop-color','#ffd1b8'); stop1.setAttribute('stop-opacity','0.9');
+  const stop2 = document.createElementNS(svgNS,'stop'); stop2.setAttribute('offset','100%'); stop2.setAttribute('stop-color','#a86bff'); stop2.setAttribute('stop-opacity','0.06');
+  grad.appendChild(stop1); grad.appendChild(stop2);
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  svg.appendChild(bowl);
+
+  // forks and philosophers
+  forks = []; philosophers = [];
+  for(let i=0;i<N;i++){
+    const angle = (i/N)*Math.PI*2 - Math.PI/2; // top-centered
+    const px = cx + Math.cos(angle)*(R+80);
+    const py = cy + Math.sin(angle)*(R+80);
+    const fx = cx + Math.cos(angle)*(R+30);
+    const fy = cy + Math.sin(angle)*(R+30);
+
+    // philosopher group
+    const g = document.createElementNS(svgNS,'g'); g.classList.add('philosopher');
+    g.setAttribute('transform',`translate(${px},${py})`);
+
+    const face = document.createElementNS(svgNS,'circle'); face.setAttribute('r',26); face.setAttribute('fill','#0f0c13'); face.setAttribute('stroke','rgba(168,107,255,0.14)'); face.setAttribute('stroke-width','2');
+    const name = document.createElementNS(svgNS,'text'); name.setAttribute('y',4); name.setAttribute('text-anchor','middle'); name.textContent = `P${i}`;
+    const stateText = document.createElementNS(svgNS,'text'); stateText.setAttribute('y',22); stateText.setAttribute('text-anchor','middle'); stateText.setAttribute('class','state'); stateText.textContent='thinking';
+    g.appendChild(face); g.appendChild(name); g.appendChild(stateText);
+
+    svg.appendChild(g);
+
+    // fork: draw line between seat positions
+    const fork = document.createElementNS(svgNS,'line'); fork.classList.add('fork');
+    // position fork slightly rotated
+    const fx1 = cx + Math.cos(angle+0.12)*(R+12);
+    const fy1 = cy + Math.sin(angle+0.12)*(R+12);
+    const fx2 = cx + Math.cos(angle+0.6)*(R-12);
+    const fy2 = cy + Math.sin(angle+0.6)*(R-12);
+    fork.setAttribute('x1',fx1); fork.setAttribute('y1',fy1); fork.setAttribute('x2',fx2); fork.setAttribute('y2',fy2);
+    fork.setAttribute('stroke','rgba(200,200,200,0.2)');
+    fork.setAttribute('data-holder','-1');
+    svg.appendChild(fork);
+
+    philosophers.push({id:i, g, stateText, face, angle, nextChange:0, state:'thinking', hungrySince:0});
+    forks.push({el:fork, holder:-1});
+  }
+
+  // store svg
+  stage.appendChild(svg);
+}
+
+function resetSim(){
+  running=false; cancelAnimationFrame(animFrame); animFrame=null;
+  N = parseInt(numSelect.value); mode = modeSelect.value; modeNote.textContent = modeSelect.options[modeSelect.selectedIndex].text;
+  createSVG();
+  log('Simulation reset. ' + N + ' philosophers. Mode: ' + mode);
+  // set timers
+  const now = performance.now();
+  philosophers.forEach((p,i)=>{
+    p.state='thinking'; p.nextChange = now + rand(1500,4000); p.hungrySince=0;
+  });
+}
+
+function pickFork(i){
+  const left = i; const right = (i+N-1)%N; // fork indices: fork i is left of philosopher i
+  // algorithm behaviours
+  if(mode==='naive'){
+    // try pick left then right
+    if(forks[left].holder===-1){ forks[left].holder = i; forks[left].el.setAttribute('stroke','#ffd27a'); forks[left].el.setAttribute('stroke-width',4); }
+    if(forks[right].holder===-1){ forks[right].holder = i; forks[right].el.setAttribute('stroke','#ffd27a'); forks[right].el.setAttribute('stroke-width',4); }
+  } else if(mode==='asymmetric'){
+    // even philosophers pick left then right; odd pick right then left
+    const first = (i%2===0)?left:right; const second = (first===left)?right:left;
+    if(forks[first].holder===-1){ forks[first].holder = i; forks[first].el.setAttribute('stroke','#ffd27a'); forks[first].el.setAttribute('stroke-width',4); }
+    if(forks[second].holder===-1){ forks[second].holder = i; forks[second].el.setAttribute('stroke','#ffd27a'); forks[second].el.setAttribute('stroke-width',4); }
+  } else if(mode==='resourceHierarchy'){
+    // always pick lower-index fork first
+    const first = Math.min(left,right); const second = Math.max(left,right);
+    if(forks[first].holder===-1){ forks[first].holder = i; forks[first].el.setAttribute('stroke','#ffd27a'); forks[first].el.setAttribute('stroke-width',4); }
+    if(forks[second].holder===-1){ forks[second].holder = i; forks[second].el.setAttribute('stroke','#ffd27a'); forks[second].el.setAttribute('stroke-width',4); }
+  }
+}
+
+function releaseForks(i){
+  const left = i; const right = (i+N-1)%N;
+  [left,right].forEach(fi=>{ if(forks[fi].holder===i){ forks[fi].holder = -1; forks[fi].el.setAttribute('stroke','rgba(200,200,200,0.2)'); forks[fi].el.setAttribute('stroke-width',3);} });
+}
+
+function canEat(i){
+  const left = i; const right = (i+N-1)%N;
+  return forks[left].holder===i && forks[right].holder===i;
+}
+
+function update(now){
+  const dt = (lastTick===null)?0:(now-lastTick);
+  lastTick = now;
+  const sped = speed;
+  philosophers.forEach((p,i)=>{
+    if(p.state==='thinking'){
+      if(now >= p.nextChange){
+        p.state='hungry'; p.hungrySince = now; p.stateText.textContent='hungry'; p.face.setAttribute('fill','#12081a'); p.face.setAttribute('stroke','#ffdd77');
+        log(`P${i} is hungry`);
+      }
+    }
+    if(p.state==='hungry'){
+      // attempt to pick forks (try every 300ms scaled)
+      if(Math.random() < 0.018*sped){ pickFork(i); }
+      // if has both forks => eat
+      if(canEat(i)){
+        p.state='eating'; p.stateText.textContent='eating'; p.eatEnd = now + rand(1200,2600)/sped; p.face.setAttribute('fill','#e6ffdc'); p.face.setAttribute('stroke','#5fbf6f');
+        log(`P${i} started eating`);
+      } else {
+        // waiting
+        p.stateText.textContent = 'waiting';
+        // if hungry too long, log
+        if(now - p.hungrySince > 12000) log(`P${i} has been hungry for ${(Math.round((now-p.hungrySince)/1000))}s — possible starvation/deadlock`);
+      }
+    }
+    if(p.state==='eating'){
+      if(now >= p.eatEnd){
+        // finish
+        releaseForks(i);
+        p.state='thinking'; p.stateText.textContent='thinking'; p.nextChange = now + rand(2000,5000); p.face.setAttribute('fill','#0f0c13'); p.face.setAttribute('stroke','rgba(168,107,255,0.14)');
+        log(`P${i} finished eating`);
+      }
+    }
+  });
+
+  // render fork holders (small circle on fork)
+  forks.forEach((f,idx)=>{
+    // add small indicator if held
+    if(!f.ind){
+      const svg = stage.querySelector('svg');
+      const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      circ.setAttribute('r',6); circ.setAttribute('fill','transparent'); circ.setAttribute('cx', (parseFloat(f.el.getAttribute('x1'))*0.6 + parseFloat(f.el.getAttribute('x2'))*0.4));
+      circ.setAttribute('cy', (parseFloat(f.el.getAttribute('y1'))*0.6 + parseFloat(f.el.getAttribute('y2'))*0.4));
+      svg.appendChild(circ); f.ind = circ;
+    }
+    if(f.holder===-1){ f.ind.setAttribute('fill','transparent'); }
+    else{ f.ind.setAttribute('fill','#ffd27a'); }
+  });
+
+  // scheduling
+  if(running) animFrame = requestAnimationFrame(update);
+}
+
+// controls
+startBtn.addEventListener('click',()=>{ if(!animFrame){ running=true; lastTick=null; animFrame=requestAnimationFrame(update); log('Simulation started'); } });
+pauseBtn.addEventListener('click',()=>{ running=false; cancelAnimationFrame(animFrame); animFrame=null; log('Paused'); });
+resetBtn.addEventListener('click',()=>{ resetSim(); });
+numSelect.addEventListener('change',()=>{ resetSim(); });
+modeSelect.addEventListener('change',()=>{ mode = modeSelect.value; modeNote.textContent = modeSelect.options[modeSelect.selectedIndex].text; resetSim(); });
+speedInput.addEventListener('input',()=>{ speed = parseFloat(speedInput.value); log('Speed set to '+speed); });
+
+// initial
+resetSim();
+</script>
+</body>
+</html>
